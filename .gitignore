@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+runs/
+*.pt
+*.bin
+*.onnx
+.DS_Store
+data/raw/
+data/processed/

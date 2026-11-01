@@ -1,0 +1,41 @@
+model:
+  backbone: "google/vit-base-patch16-224-in21k"
+  hidden_dim: 768
+  num_classes: 4
+  classes:
+    - "Fresh"
+    - "Ripe"
+    - "Overripe"
+    - "Spoiled"
+
+training:
+  batch_size: 16
+  learning_rate: 0.0001
+  epochs: 15
+  weight_decay: 0.01
+  alpha_classification: 1.0   # Weight for Cross-Entropy loss
+  beta_regression: 0.5        # Weight for MSE log-transformed shelf-life loss
+
+markdown_ladder:
+  base_price_default_inr: 50.0
+  tiers:
+    - min_days: 4.0
+      grade: "Fresh"
+      action: "HOLD"
+      discount_pct: 0
+      reason: "Optimal shelf-life remaining (>4 days). Maintain full margin at base price."
+    - min_days: 2.0
+      grade: "Ripe"
+      action: "SELL_FIRST"
+      discount_pct: 15
+      reason: "Ripe window (2-4 days). Prioritize FEFO pick order with introductory 15% markdown."
+    - min_days: 0.8
+      grade: "Overripe"
+      action: "DISCOUNT_40"
+      discount_pct: 40
+      reason: "Accelerated ripening (<48h). Aggressive 40% clearance discount to avoid spoilage."
+    - min_days: 0.0
+      grade: "Spoiled"
+      action: "DUMP_SALVAGE"
+      discount_pct: 100
+      reason: "Produce reached spoilage threshold. Remove from dark store inventory immediately."
