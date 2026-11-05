@@ -166,7 +166,7 @@ col_img, col_metrics = st.columns([0.45, 0.55])
 
 with col_img:
     st.subheader("🔍 Produce Inspection Frame")
-    st.image(st.session_state.active_image, caption=f"Active Sample: {st.session_state.active_name}", use_container_width=True)
+    st.image(st.session_state.active_image, caption=f"Active Sample: {st.session_state.active_name}", width="stretch")
 
 with col_metrics:
     st.subheader("📊 Multi-Task Model Predictions")
