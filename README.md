@@ -1,6 +1,12 @@
-# Fresh-Grade 🍅🍌📸
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://fresh-grade.streamlit.app)
+[![GitHub](https://img.shields.io/badge/GitHub-findsamirks--commits-black?style=flat&logo=github)](https://github.com/findsamirks-commits/Fresh-Grade)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch)](https://pytorch.org)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-ViT--B%2F16-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/google/vit-base-patch16-224-in21k)
 
 **Vision Transformer (ViT) multi-task deep learning model for perishable produce quality grading + continuous shelf-life regression.**
+
+> 🌐 **Live Interactive Streamlit Demo:** [fresh-grade.streamlit.app](https://fresh-grade.streamlit.app)
 
 A single image of a tomato, banana, apple, or leafy green goes in; two unified predictions come out:
 
