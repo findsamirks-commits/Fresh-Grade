@@ -1,62 +1,124 @@
-"""Unit tests for Fresh-Grade Markdown Bridge and Model dimensions."""
+"""Decoupled Business Unit Tests for Fresh-Grade Markdown Bridge.
+
+Runs 100% without PyTorch installed to provide instantaneous feedback on
+merchandising pricing ladders, FEFO picking logic, and edge-case governance.
+"""
 
 import os
 import sys
 import pytest
-import torch
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.markdown_bridge import MarkdownBridge
-from src.model import FreshGradeMultiTaskViT, JointLoss
+from src.markdown_bridge import MarkdownBridge, MarkdownDecision
 
 
-def test_markdown_bridge_rules():
+def test_1_fresh_produce_holding():
+    """Fresh produce with >4 days remaining maintains full price with zero markdown."""
+    bridge = MarkdownBridge(base_price_inr=60.0)
+    decision = bridge.evaluate(grade="Fresh", days_to_spoil=6.5)
+
+    assert decision.action == "HOLD"
+    assert decision.suggested_discount_pct == 0
+    assert decision.suggested_price_inr == 60.00
+    assert decision.shelf_life_band == ">96h (Fresh)"
+
+
+def test_2_ripe_fefo_priority():
+    """Ripe produce with 2-4 days remaining triggers FEFO picking priority with 15% markdown."""
+    bridge = MarkdownBridge(base_price_inr=100.0)
+    decision = bridge.evaluate(grade="Ripe", days_to_spoil=2.8)
+
+    assert decision.action == "SELL_FIRST"
+    assert decision.suggested_discount_pct == 15
+    assert decision.suggested_price_inr == 85.00
+    assert decision.shelf_life_band == "48–96h"
+
+
+def test_3_overripe_clearance():
+    """Overripe produce with 1-2 days remaining triggers aggressive 40% clearance discount."""
+    bridge = MarkdownBridge(base_price_inr=50.0)
+    decision = bridge.evaluate(grade="Overripe", days_to_spoil=1.2)
+
+    assert decision.action == "DISCOUNT_40"
+    assert decision.suggested_discount_pct == 40
+    assert decision.suggested_price_inr == 30.00
+    assert decision.shelf_life_band == "12–48h"
+
+
+def test_4_spoiled_dump_salvage():
+    """Spoiled produce with <1 day remaining triggers zero-recovery disposal."""
+    bridge = MarkdownBridge(base_price_inr=80.0)
+    decision = bridge.evaluate(grade="Spoiled", days_to_spoil=0.2)
+
+    assert decision.action == "DUMP_SALVAGE"
+    assert decision.suggested_discount_pct == 100
+    assert decision.suggested_price_inr == 0.00
+    assert decision.shelf_life_band == "<12h (Spoiled)"
+
+
+def test_5_forced_dump_override_on_spoiled_grade():
+    """Even if sensor/regression reports high days (e.g. 5.5d), Spoiled grade overrides to DUMP."""
+    bridge = MarkdownBridge(base_price_inr=50.0)
+    decision = bridge.evaluate(grade="Spoiled", days_to_spoil=5.5)
+
+    assert decision.action == "DUMP_SALVAGE"
+    assert decision.suggested_discount_pct == 100
+    assert decision.suggested_price_inr == 0.00
+
+
+def test_6_forced_overripe_minimum_discount_override():
+    """Even if regression outputs 4.5 days, Overripe grade forces at least 40% discount."""
+    bridge = MarkdownBridge(base_price_inr=100.0)
+    decision = bridge.evaluate(grade="Overripe", days_to_spoil=4.5)
+
+    assert decision.action == "DISCOUNT_40"
+    assert decision.suggested_discount_pct == 40
+    assert decision.suggested_price_inr == 60.00
+
+
+def test_7_base_price_fallback_on_null_or_invalid():
+    """Falls back to default base price when None, zero, or negative price is passed."""
     bridge = MarkdownBridge(base_price_inr=50.0)
 
-    # 1. Fresh -> HOLD, 0% discount
-    d_fresh = bridge.evaluate(grade="Fresh", days_to_spoil=6.5)
-    assert d_fresh.action == "HOLD"
-    assert d_fresh.suggested_discount_pct == 0
-    assert d_fresh.suggested_price_inr == 50.0
+    # Test None
+    d_none = bridge.evaluate(grade="Fresh", days_to_spoil=5.0, base_price_inr=None)
+    assert d_none.base_price_inr == 50.0
+    assert d_none.suggested_price_inr == 50.0
 
-    # 2. Ripe -> SELL_FIRST, 15% discount
-    d_ripe = bridge.evaluate(grade="Ripe", days_to_spoil=2.8)
-    assert d_ripe.action == "SELL_FIRST"
-    assert d_ripe.suggested_discount_pct == 15
-    assert d_ripe.suggested_price_inr == 42.50
+    # Test zero
+    d_zero = bridge.evaluate(grade="Fresh", days_to_spoil=5.0, base_price_inr=0.0)
+    assert d_zero.base_price_inr == 50.0
 
-    # 3. Overripe -> DISCOUNT_40, 40% discount
-    d_overripe = bridge.evaluate(grade="Overripe", days_to_spoil=1.2)
-    assert d_overripe.action == "DISCOUNT_40"
-    assert d_overripe.suggested_discount_pct == 40
-    assert d_overripe.suggested_price_inr == 30.00
-
-    # 4. Spoiled -> DUMP_SALVAGE, 100% discount
-    d_spoiled = bridge.evaluate(grade="Spoiled", days_to_spoil=0.2)
-    assert d_spoiled.action == "DUMP_SALVAGE"
-    assert d_spoiled.suggested_discount_pct == 100
-    assert d_spoiled.suggested_price_inr == 0.0
+    # Test negative
+    d_neg = bridge.evaluate(grade="Ripe", days_to_spoil=3.0, base_price_inr=-10.0)
+    assert d_neg.base_price_inr == 50.0
+    assert d_neg.suggested_price_inr == 42.50
 
 
-def test_model_forward_pass_and_loss():
-    model = FreshGradeMultiTaskViT(num_classes=4, hidden_dim=128, pretrained=False)
-    criterion = JointLoss(alpha=1.0, beta=0.5)
+def test_8_negative_days_protection():
+    """Negative estimated days are safely clamped to 0.0 and treated as DUMP_SALVAGE."""
+    bridge = MarkdownBridge(base_price_inr=40.0)
+    decision = bridge.evaluate(grade="Spoiled", days_to_spoil=-2.5)
 
-    batch_size = 2
-    dummy_imgs = torch.randn(batch_size, 3, 224, 224)
-    target_cls = torch.tensor([1, 3], dtype=torch.long)
-    target_days = torch.tensor([3.2, 0.4], dtype=torch.float32)
+    assert decision.days_to_spoil == 0.0
+    assert decision.action == "DUMP_SALVAGE"
+    assert decision.suggested_price_inr == 0.0
 
-    logits, days, repr_embed = model(dummy_imgs)
 
-    assert logits.shape == (batch_size, 4)
-    assert days.shape == (batch_size, 1)
-    assert torch.all(days >= 0.0), "Shelf-life days must be non-negative via Softplus"
-
-    loss, l_cls, l_reg = criterion(logits, days, target_cls, target_days)
-    assert loss.item() > 0.0
-    assert not torch.isnan(loss)
+def test_9_custom_ladder_config_injection():
+    """Verifies ladder can be instantiated with custom dictionary or YAML config."""
+    custom_ladder = {
+        "markdown_ladder": {
+            "fresh": {"max_days": float("inf"), "discount_pct": 5, "action": "HOLD"},
+            "ripe": {"max_days": 3.0, "discount_pct": 20, "action": "SELL_FIRST"},
+        }
+    }
+    bridge = MarkdownBridge(base_price_inr=100.0, config=custom_ladder)
+    assert bridge.ladder_config == custom_ladder
+    decision = bridge.evaluate(grade="Fresh", days_to_spoil=7.0)
+    assert decision.action == "HOLD"
+    assert decision.base_price_inr == 100.0

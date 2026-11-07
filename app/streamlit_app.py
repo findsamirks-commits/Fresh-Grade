@@ -2,7 +2,7 @@
 
 Vision Transformer (ViT) Perishable Produce Quality Grading + Shelf-Life Regression.
 Demonstrates simultaneous grade classification, continuous days-to-spoil estimation,
-and automated markdown pricing recommendations.
+interactive ViT Attention Rollout heatmap interpretability, and automated markdown pricing recommendations.
 """
 
 import json
@@ -17,7 +17,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from src.inference import FreshGradePredictor
+from src.inference import FreshGradePredictor, generate_attention_overlay
 from src.data import generate_synthetic_produce_image
 
 # -----------------------------------------------------------------------------
@@ -67,10 +67,17 @@ st.markdown('<div class="main-title">🍅🍌📸 Fresh-Grade: ViT Quality Gradi
 st.markdown(
     '<div class="sub-title">'
     "Dual-head Vision Transformer (ViT) pipeline estimating <b>Quality Grade</b> and "
-    "continuous <b>Days-to-Spoil</b> to automate perishable dynamic markdowns and FEFO dark-store picking."
+    "continuous <b>Days-to-Spoil</b> with <b>Attention Rollout</b> interpretability to automate perishable dynamic markdowns and FEFO dark-store picking."
     "</div>",
     unsafe_allow_html=True,
 )
+
+GRADE_EMOJIS = {
+    "Fresh": "🟢 Fresh",
+    "Ripe": "🟡 Ripe",
+    "Overripe": "🟠 Overripe",
+    "Spoiled": "🔴 Spoiled",
+}
 
 # -----------------------------------------------------------------------------
 # Sidebar: Setup & Presets
@@ -102,13 +109,24 @@ with st.sidebar:
         preset_spoiled = st.button("⚠️ Spoiled", use_container_width=True)
 
     st.markdown("---")
+    st.subheader("🔬 ViT Explainability")
+    show_attention = st.toggle(
+        "🔥 Show Attention Heatmap",
+        value=False,
+        help="Superimposes Vision Transformer self-attention rollout matrix showing salient features (bruising, mold, decay).",
+    )
+    attn_alpha = 0.45
+    if show_attention:
+        attn_alpha = st.slider("Heatmap Intensity", min_value=0.2, max_value=0.8, value=0.45, step=0.05)
+
+    st.markdown("---")
     st.markdown("### 📋 Dynamic Markdown Ladder")
     st.markdown(
         """
-        - **Fresh (>4 days):** Full Margin (`HOLD`, ₹0 discount)
-        - **Ripe (2–4 days):** FEFO Priority (`SELL_FIRST`, 15% off)
-        - **Overripe (1–2 days):** Clearance (`DISCOUNT_40`, 40% off)
-        - **Spoiled (<1 day):** Zero-Recovery (`DUMP_SALVAGE`)
+        - **🟢 Fresh (>4 days):** Full Margin (`HOLD`, ₹0 discount)
+        - **🟡 Ripe (2–4 days):** FEFO Priority (`SELL_FIRST`, 15% off)
+        - **🟠 Overripe (1–2 days):** Clearance (`DISCOUNT_40`, 40% off)
+        - **🔴 Spoiled (<1 day):** Zero-Recovery (`DUMP_SALVAGE`)
         """
     )
 
@@ -116,7 +134,7 @@ with st.sidebar:
     st.markdown("### 👨‍💻 Developer & Architect")
     st.markdown("**Samir Sandhwar** | Category Head & AI Engineer")
     st.markdown("[![GitHub](https://img.shields.io/badge/GitHub-findsamirks--commits-black?style=flat&logo=github)](https://github.com/findsamirks-commits/Fresh-Grade)")
-    st.markdown("[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-findsamirks-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/findsamirks)")
+    st.markdown("[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-findsamirks%2FFresh--Grade--ViT-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/findsamirks/Fresh-Grade-ViT)")
     st.markdown("[![LinkedIn](https://img.shields.io/badge/LinkedIn-samirsandhwar-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/samirsandhwar)")
 
 # -----------------------------------------------------------------------------
@@ -156,8 +174,17 @@ if uploaded_file is not None:
 # -----------------------------------------------------------------------------
 # Inference Execution
 # -----------------------------------------------------------------------------
-predictor = FreshGradePredictor()
-result = predictor.predict(st.session_state.active_image, base_price_inr=base_price)
+@st.cache_resource
+def get_predictor():
+    return FreshGradePredictor()
+
+predictor = get_predictor()
+result = predictor.predict(
+    st.session_state.active_image,
+    base_price_inr=base_price,
+    return_attention=True,
+    return_overlay=True,
+)
 
 # -----------------------------------------------------------------------------
 # Main Visual & Metric Display
@@ -165,8 +192,20 @@ result = predictor.predict(st.session_state.active_image, base_price_inr=base_pr
 col_img, col_metrics = st.columns([0.45, 0.55])
 
 with col_img:
-    st.subheader("🔍 Produce Inspection Frame")
-    st.image(st.session_state.active_image, caption=f"Active Sample: {st.session_state.active_name}", width="stretch")
+    if show_attention and "attention_overlay" in result:
+        st.subheader("🔥 ViT Attention Rollout Heatmap")
+        st.image(
+            result["attention_overlay"],
+            caption="Jet Colormap: Highlights visual patches driving ripeness and spoilage scoring",
+            width="stretch",
+        )
+    else:
+        st.subheader("🔍 Produce Inspection Frame")
+        st.image(
+            st.session_state.active_image,
+            caption=f"Active Sample: {st.session_state.active_name}",
+            width="stretch",
+        )
 
 with col_metrics:
     st.subheader("📊 Multi-Task Model Predictions")
@@ -176,7 +215,8 @@ with col_metrics:
     conf = result["grade_confidence"] * 100.0
     days = result["days_to_spoil"]
 
-    m1.metric("Predicted Grade", grade, delta=f"{conf:.1f}% Conf")
+    display_grade = GRADE_EMOJIS.get(grade, grade)
+    m1.metric("Predicted Grade", display_grade, delta=f"{conf:.1f}% Conf")
     m2.metric("Remaining Shelf Life", f"{days:.1f} Days", delta=result["shelf_life_band"])
     m3.metric("Inference Latency", f"{result['inference_ms']} ms", help="Evaluated on 224x224 frame")
 
@@ -204,13 +244,13 @@ c_act3.metric("Adjusted Selling Price", f"₹{sugg_p:.2f}", delta=f"-₹{orig_p 
 
 # Operational Alert Box
 if action == "DUMP_SALVAGE":
-    st.error(f"🚨 **IMMEDIATE DISPOSAL REQUIRED:** {md['reason']}", icon="🚨")
+    st.error(f"🚨 **IMMEDIATE DISPOSAL REQUIRED (🔴 SPOILED):** {md['reason']}", icon="🚨")
 elif action == "DISCOUNT_40":
-    st.warning(f"⚠️ **URGENT MARKDOWN CLEARANCE (40% OFF):** {md['reason']}", icon="⚠️")
+    st.warning(f"⚠️ **URGENT MARKDOWN CLEARANCE (🟠 40% OFF):** {md['reason']}", icon="⚠️")
 elif action == "SELL_FIRST":
-    st.info(f"🛒 **FEFO PICKING PRIORITY (15% OFF):** {md['reason']}", icon="🛒")
+    st.info(f"🛒 **FEFO PICKING PRIORITY (🟡 15% OFF):** {md['reason']}", icon="🛒")
 else:
-    st.success(f"✅ **MAINTAIN FULL MARGIN:** {md['reason']}", icon="✅")
+    st.success(f"✅ **MAINTAIN FULL MARGIN (🟢 FRESH):** {md['reason']}", icon="✅")
 
 # -----------------------------------------------------------------------------
 # JSON Export Payload
@@ -220,14 +260,18 @@ col_exp1, col_exp2 = st.columns([0.7, 0.3])
 with col_exp1:
     st.markdown("### 📥 Integration Payload for `Perishable-Markdown-Optimizer`")
     st.caption("Structured JSON contract consumed by automated pricing engines and dark store picking totes.")
+
+# Remove PIL object before JSON dumping
+exportable_result = {k: v for k, v in result.items() if k not in ("attention_overlay", "attention_map")}
+
 with col_exp2:
     st.download_button(
         "💾 Download Inference Report (JSON)",
-        data=json.dumps(result, indent=2),
+        data=json.dumps(exportable_result, indent=2),
         file_name=f"fresh_grade_audit_{st.session_state.active_name.split('.')[0]}.json",
         mime="application/json",
         use_container_width=True,
     )
 
 with st.expander("🔍 View Raw JSON Audit Report", expanded=False):
-    st.json(result)
+    st.json(exportable_result)

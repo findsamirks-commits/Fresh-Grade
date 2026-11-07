@@ -92,15 +92,16 @@ Fresh-Grade/
 │   └── fresh_grade.yaml           # Training hyperparams, loss weights, markdown ladders
 ├── src/
 │   ├── __init__.py
-│   ├── model.py                   # Multi-Task ViT (shared [CLS] -> Classification & Regression)
-│   ├── data.py                    # FreshGradeDataset, transforms & synthetic produce generator
+│   ├── model.py                   # Multi-Task ViT + Attention Rollout (Abnar & Zuidema 2020)
+│   ├── data.py                    # Converters (Mendeley, Kaggle, Milkbasket) & synthetic generator
 │   ├── markdown_bridge.py         # Days-to-spoil -> price markdown ladder rules
-│   ├── inference.py               # Single-image predictor & JSON report generator
-│   └── train.py                   # PyTorch training loop with joint multi-task loss
+│   ├── inference.py               # Predictor, Attention Overlay generator & CLI (--out-attn)
+│   └── train.py                   # Layer-wise LR (3e-5/3e-4), cosine warmup & AMP training loop
 ├── app/
-│   └── streamlit_app.py           # Interactive inspection UI with live grade & markdown alerts
+│   └── streamlit_app.py           # Interactive UI with ViT Attention Heatmap toggle & JSON export
 ├── tests/
-│   └── test_markdown.py           # Unit tests for pricing ladders & model tensor dimensions
+│   ├── test_markdown.py           # 9 decoupled business unit tests (runs without PyTorch)
+│   └── test_model.py              # PyTorch ViT tensor dimensions & Attention Rollout test
 └── assets/
     └── demo_produce.jpg           # High-resolution synthetic audit asset
 ```
@@ -118,20 +119,22 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Run Self-Tests
+### 2. Run Self-Tests (9 Decoupled Business Tests + 2 Deep Learning Tests)
 ```bash
-pytest tests/test_markdown.py
+pytest tests/ -v
+# tests/test_markdown.py runs in <0.05s without PyTorch for rapid CI/CD
 ```
 
-### 3. Run Inference on Produce Image
+### 3. Run Inference & Generate Attention Rollout Heatmap
 ```bash
-python src/inference.py
+python src/inference.py --image assets/demo_produce.jpg --out-attn assets/attention_overlay.jpg
 ```
 
 ### 4. Launch the Streamlit Interactive UI
 ```bash
 streamlit run app/streamlit_app.py
 ```
+> Toggle **"🔥 Show Attention Heatmap"** in the sidebar to visualize ViT patch interpretability!
 
 ---
 
