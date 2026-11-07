@@ -9,3 +9,4 @@ runs/
 .DS_Store
 data/raw/
 data/processed/
+upload_weights.py
